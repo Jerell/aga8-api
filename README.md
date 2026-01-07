@@ -1,6 +1,6 @@
 # aga8-api
 
-A web API for producing thermodynamic data using the AGA8 equation of state.
+A web API for producing thermodynamic data using the [AGA8 crate](https://crates.io/crates/aga8).
 
 This API generates thermodynamic data in the tab file format used by Multiflash.  
 The output includes all the metadata like `BUBBLEPRESSURES`, `BUBBLETEMPERATURES`, `CRITICALPRESSURE`, `CRITICALTEMPERATURE`, etc.
