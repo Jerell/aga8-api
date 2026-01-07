@@ -4,6 +4,7 @@ use poem_openapi::{
     ApiResponse, OpenApi, OpenApiService,
     payload::{Json, PlainText},
 };
+use std::time::Instant;
 
 /// Error response
 #[derive(ApiResponse)]
@@ -25,10 +26,16 @@ impl Api {
         &self,
         request: Json<ThermodynamicDataRequest>,
     ) -> Result<PlainText<String>, ErrorResponse> {
+        let start = Instant::now();
+
         let data = ThermodynamicService::generate_data(&request.0)
             .map_err(|e| ErrorResponse::BadRequest(PlainText(e.to_string())))?;
 
         let tab_content = ThermodynamicService::generate_tab_file(&data);
+
+        let duration = start.elapsed();
+        eprintln!("Generation time: {:.3}s", duration.as_secs_f64());
+
         Ok(PlainText(tab_content))
     }
 
@@ -38,8 +45,12 @@ impl Api {
         &self,
         request: Json<ThermodynamicDataRequest>,
     ) -> Result<Json<serde_json::Value>, ErrorResponse> {
+        let start = Instant::now();
+
         let data = ThermodynamicService::generate_data(&request.0)
             .map_err(|e| ErrorResponse::BadRequest(PlainText(e.to_string())))?;
+
+        let duration = start.elapsed();
 
         // Convert to JSON (simplified - you may want to create a proper serialization)
         let json = serde_json::json!({
@@ -48,8 +59,11 @@ impl Api {
             "phase_boundaries": data.phase_boundaries,
             "pressure_grid": data.pressure_grid,
             "temperature_grid": data.temperature_grid,
-            "num_points": data.points.len()
+            "num_points": data.points.len(),
+            "generation_time_seconds": duration.as_secs_f64()
         });
+
+        eprintln!("Generation time: {:.3}s", duration.as_secs_f64());
 
         Ok(Json(json))
     }
