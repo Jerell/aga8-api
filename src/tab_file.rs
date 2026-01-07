@@ -134,14 +134,18 @@ impl TabFileFormatter {
         ));
 
         // Critical point
-        output.push_str(&format!(
-            "CRITICALPRESSURE = ( {:.2} ) PA, \\\n",
-            critical_point.pressure
-        ));
-        output.push_str(&format!(
-            "CRITICALTEMPERATURE = ( {:.7} ) C, \\\n",
-            critical_point.temperature
-        ));
+        let crit_p_str = if critical_point.pressure.is_nan() {
+            "-999".to_string()
+        } else {
+            format!("{:.2}", critical_point.pressure)
+        };
+        let crit_t_str = if critical_point.temperature.is_nan() {
+            "-999".to_string()
+        } else {
+            format!("{:.7}", critical_point.temperature)
+        };
+        output.push_str(&format!("CRITICALPRESSURE = ( {} ) PA, \\\n", crit_p_str));
+        output.push_str(&format!("CRITICALTEMPERATURE = ( {} ) C, \\\n", crit_t_str));
 
         // Columns
         output.push_str("COLUMNS = ( PT, TM, ROG, ROHL, DROGDP,  DROHLDP, DROGDT, DROHLDT, RS, VISG, VISHL, CPG, CPHL,   HG, HHL, TCG, TCHL, SIGGHL, SEG, SEHL)\n");
@@ -161,7 +165,9 @@ impl TabFileFormatter {
         let mut current_line_len = output.len();
 
         for (i, &value) in values.iter().enumerate() {
-            let value_str = if value.abs() < 1.0 {
+            let value_str = if value.is_nan() {
+                "-999".to_string()
+            } else if value.abs() < 1.0 {
                 format!("{:.9}", value)
             } else {
                 format!("{:.2}", value)

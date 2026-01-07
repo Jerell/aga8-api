@@ -36,9 +36,9 @@ fn test_generate_data() {
     assert_eq!(data.pressure_grid.len(), 5);
     assert_eq!(data.temperature_grid.len(), 10);
 
-    // Validate critical point
-    assert!(data.critical_point.pressure > 0.0);
-    assert!(data.critical_point.temperature > -273.15);
+    // Validate critical point - not available from aga8, so should be NaN
+    assert!(data.critical_point.pressure.is_nan());
+    assert!(data.critical_point.temperature.is_nan());
 
     // Validate phase boundaries
     assert_eq!(

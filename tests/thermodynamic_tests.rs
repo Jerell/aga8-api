@@ -12,31 +12,14 @@ fn test_critical_point_calculation() {
     let eos = EquationOfState::Gerg2008;
     let critical = Aga8Calculator::calculate_critical_point(&composition, &eos).unwrap();
 
-    // Validate critical point properties
+    // Critical point is not available from aga8 crate, so all values should be NaN
     assert!(
-        critical.pressure > 0.0,
-        "Critical pressure should be positive"
+        critical.pressure.is_nan(),
+        "Critical pressure should be NaN (not available from aga8)"
     );
     assert!(
-        critical.pressure < 100_000_000.0,
-        "Critical pressure should be reasonable (< 100 MPa)"
-    );
-    assert!(
-        critical.temperature > -273.15,
-        "Critical temperature should be above absolute zero"
-    );
-    assert!(
-        critical.temperature < 1000.0,
-        "Critical temperature should be reasonable (< 1000°C)"
-    );
-
-    // For CO2-H2 mixture, critical temperature should be in a reasonable range
-    // CO2 critical temp is ~31°C, so mixture should be in that ballpark
-    // Note: Our critical point calculation uses iterative search and may return estimates
-    // So we use a wider range to accommodate the calculation method
-    assert!(
-        critical.temperature > -100.0 && critical.temperature < 300.0,
-        "Critical temperature should be in reasonable range for CO2-H2 mixture"
+        critical.temperature.is_nan(),
+        "Critical temperature should be NaN (not available from aga8)"
     );
 }
 
@@ -73,8 +56,12 @@ fn test_phase_boundaries() {
         temperature_grid.len(),
         "Bubble pressures should match temperature grid length"
     );
+    // Phase boundaries are not available from aga8 crate, so all values should be NaN
     for &bp in &boundaries.bubble_pressures {
-        assert!(bp > 0.0, "Bubble pressure should be positive");
+        assert!(
+            bp.is_nan(),
+            "Bubble pressure should be NaN (not available from aga8)"
+        );
     }
 
     // Validate bubble temperatures
@@ -83,6 +70,12 @@ fn test_phase_boundaries() {
         pressure_grid.len(),
         "Bubble temperatures should match pressure grid length"
     );
+    for &bt in &boundaries.bubble_temperatures {
+        assert!(
+            bt.is_nan(),
+            "Bubble temperature should be NaN (not available from aga8)"
+        );
+    }
 
     // Validate dew pressures
     assert_eq!(
@@ -91,7 +84,10 @@ fn test_phase_boundaries() {
         "Dew pressures should match temperature grid length"
     );
     for &dp in &boundaries.dew_pressures {
-        assert!(dp > 0.0, "Dew pressure should be positive");
+        assert!(
+            dp.is_nan(),
+            "Dew pressure should be NaN (not available from aga8)"
+        );
     }
 
     // Validate dew temperatures
@@ -100,21 +96,15 @@ fn test_phase_boundaries() {
         pressure_grid.len(),
         "Dew temperatures should match pressure grid length"
     );
-
-    // Phase boundary consistency checks
-    // At the critical point, bubble and dew should converge
-    // For now, we just check that values are reasonable
-    for i in 0..temperature_grid.len().min(pressure_grid.len()) {
-        // Bubble pressure should generally be higher than dew pressure at same temperature
-        // (This is a general rule, but may not hold at all conditions)
-        if boundaries.bubble_pressures[i] > 0.0 && boundaries.dew_pressures[i] > 0.0 {
-            // This is a soft check - in some regions dew > bubble
-            assert!(
-                boundaries.bubble_pressures[i] > 0.0 && boundaries.dew_pressures[i] > 0.0,
-                "Both bubble and dew pressures should be positive"
-            );
-        }
+    for &dt in &boundaries.dew_temperatures {
+        assert!(
+            dt.is_nan(),
+            "Dew temperature should be NaN (not available from aga8)"
+        );
     }
+
+    // Phase boundaries are not available from aga8 crate
+    // (Removed consistency checks since values are NaN)
 }
 
 /// Test thermodynamic point calculation
@@ -179,14 +169,14 @@ fn test_critical_point_consistency() {
     let eos = EquationOfState::Gerg2008;
     let critical = Aga8Calculator::calculate_critical_point(&composition, &eos).unwrap();
 
-    // Verify critical point values are reasonable
+    // Critical point is not available from aga8 crate, so all values should be NaN
     assert!(
-        critical.pressure > 0.0,
-        "Critical pressure should be positive"
+        critical.pressure.is_nan(),
+        "Critical pressure should be NaN (not available from aga8)"
     );
     assert!(
-        critical.temperature > -273.15,
-        "Critical temperature should be above absolute zero"
+        critical.temperature.is_nan(),
+        "Critical temperature should be NaN (not available from aga8)"
     );
 
     // Try to calculate properties at a point well away from critical

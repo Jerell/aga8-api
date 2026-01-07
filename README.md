@@ -118,19 +118,23 @@ cargo test
 - `src/main.rs` - Application entry point
 - `tests/` - Comprehensive test suite
 
-## Properties Available from aga8 Crate
+## Properties Available from aga8 Crate (GERG-2008)
 
-This API uses the `aga8` Rust crate which provides thermodynamic properties through two equation of state implementations:
+This API uses the `aga8` Rust crate which provides thermodynamic properties through GERG-2008 (and optionally AGA8 DETAIL) equation of state implementations.
 
-### GERG-2008 Equation of State
+### GERG-2008 Equation of State (Primary)
 
-- **Density** (molar, converted to mass density)
+The aga8 crate's GERG-2008 implementation provides the following properties directly (all accessed from the `Gerg2008` struct after calling `density()` and `properties()`):
+
+- **Density** (d) - mol/l (converted to kg/m³ in our API)
 - **Compressibility factor** (z)
+- **Internal energy** (u) - J/mol (available from aga8 but not currently used in our output)
 - **Enthalpy** (h) - J/mol
 - **Entropy** (s) - J/(mol·K)
 - **Isobaric heat capacity** (cp) - J/(mol·K)
 - **Isochoric heat capacity** (cv) - J/(mol·K)
-- **Pressure derivatives** (dp_dd, dp_dt) - used to calculate density derivatives
+- **Pressure derivatives** (dp_dd, dp_dt) - kPa/(mol/l) and kPa/K (used to calculate density derivatives)
+- **Second pressure derivatives** (d2p_dd2, d2p_dtd) - available from aga8 but not currently used
 - **Speed of sound** (w) - m/s
 - **Gibbs energy** (g) - J/mol
 - **Joule-Thomson coefficient** (jt) - K/kPa
@@ -140,13 +144,20 @@ This API uses the `aga8` Rust crate which provides thermodynamic properties thro
 
 Provides the same properties as GERG-2008.
 
-### Properties Not Available from aga8
+### Properties Not Available from aga8 (GERG-2008)
 
-The following properties are **not** provided by the aga8 crate and are set to zero in the output:
+The following properties are **not** provided by the aga8 crate's GERG-2008 implementation:
 
-- **Viscosity** (gas and liquid)
-- **Thermal conductivity** (gas and liquid)
-- **Surface tension**
+- **Viscosity** (gas and liquid) - set to 0.0 in output
+- **Thermal conductivity** (gas and liquid) - set to 0.0 in output
+- **Surface tension** - set to 0.0 in output
+- **Phase boundaries** (bubble/dew points) - set to -999 (NaN) in output
+- **Critical point** (critical pressure and temperature) - set to -999 (NaN) in output
+
+The aga8 crate's GERG-2008 implementation does not provide:
+
+- **Phase boundary calculations**: The documentation states "No checks are made to determine the phase boundary". Phase boundaries would require two-phase flash calculations which GERG-2008 does not provide.
+- **Critical point calculations**: While GERG-2008 has a private `pseudocriticalpoint()` method (used internally for mixing rules), it does not calculate the actual critical point of mixtures, which would require solving the criticality conditions: (dp/dd)\_T = 0 and (d²p/dd²)\_T = 0.
 
 These properties would require additional correlations or separate property packages to calculate.
 
