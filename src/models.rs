@@ -145,6 +145,33 @@ impl Composition {
 }
 
 impl PressureRange {
+    /// Validate pressure range is within AGA8 valid limits
+    /// AGA8 (GERG-2008) valid pressure range: 0.1 MPa to 275 MPa
+    pub fn validate(&self) -> Result<(), String> {
+        const MIN_PRESSURE_PA: f64 = 100_000.0; // 0.1 MPa (practical minimum)
+        const MAX_PRESSURE_PA: f64 = 275_000_000.0; // 275 MPa (AGA8 maximum)
+
+        if self.min < MIN_PRESSURE_PA {
+            return Err(format!(
+                "Minimum pressure {} Pa is below AGA8 valid range (minimum: {} Pa)",
+                self.min, MIN_PRESSURE_PA
+            ));
+        }
+        if self.max > MAX_PRESSURE_PA {
+            return Err(format!(
+                "Maximum pressure {} Pa is above AGA8 valid range (maximum: {} Pa)",
+                self.max, MAX_PRESSURE_PA
+            ));
+        }
+        if self.min >= self.max {
+            return Err("Minimum pressure must be less than maximum pressure".to_string());
+        }
+        if self.points == 0 {
+            return Err("Number of points must be greater than 0".to_string());
+        }
+        Ok(())
+    }
+
     /// Generate pressure grid
     pub fn generate_grid(&self) -> Vec<f64> {
         if self.points == 1 {

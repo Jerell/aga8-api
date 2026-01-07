@@ -30,8 +30,8 @@ Generates thermodynamic data and returns it as a tab file in Multiflash format.
     "mole_fractions": [0.99, 0.01]
   },
   "pressure_range": {
-    "min": 1000.0,
-    "max": 850000.0,
+    "min": 100000.0,
+    "max": 8500000.0,
     "points": 100
   },
   "enthalpy_range": {
@@ -41,6 +41,17 @@ Generates thermodynamic data and returns it as a tab file in Multiflash format.
   }
 }
 ```
+
+**Note:**
+
+- **Pressure range:** Must be within AGA8 valid range: **100,000 Pa (0.1 MPa) to 275,000,000 Pa (275 MPa)**
+  - For optimal accuracy (0.1% uncertainty): Up to **12,000,000 Pa (12 MPa)**
+- **Temperature range:** Automatically constrained to **-29°C to 200°C** (practical range)
+  - Theoretical AGA8 range: **-130°C to 200°C**, but minimum working temperature is pressure-dependent
+  - At 0.1 MPa (minimum pressure): minimum is **-29°C**
+  - At higher pressures, lower temperatures may work (e.g., -60°C at 1 MPa)
+  - For optimal accuracy (0.1% uncertainty): **-8°C to 62°C**
+- **Important:** AGA8 is not recommended for use near the critical point or in the liquid phase, and is valid only for lean natural gas mixtures.
 
 **Response:** Plain text tab file
 

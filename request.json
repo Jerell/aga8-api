@@ -4,7 +4,7 @@
     "mole_fractions": [0.99, 0.01]
   },
   "pressure_range": {
-    "min": 1000.0,
+    "min": 100000.0,
     "max": 850000.0,
     "points": 100
   },

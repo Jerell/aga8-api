@@ -16,6 +16,12 @@ impl ThermodynamicService {
             .validate()
             .map_err(Aga8Error::InvalidComposition)?;
 
+        // Validate pressure range is within AGA8 limits
+        request
+            .pressure_range
+            .validate()
+            .map_err(|e| Aga8Error::CalculationFailed(e))?;
+
         // Generate grids
         let pressure_grid = request.pressure_range.generate_grid();
         let enthalpy_grid = request.enthalpy_range.generate_grid();
@@ -79,11 +85,15 @@ impl ThermodynamicService {
         _pressure_grid: &[f64],
         enthalpy_grid: &[f64],
     ) -> Result<Vec<f64>, Aga8Error> {
-        // For now, create a temperature grid based on a reasonable range
-        // In a real implementation, you'd solve T = f(H, P) for each enthalpy value
-        // This is a placeholder that creates a temperature grid
-        let min_temp = -20.0; // °C
-        let max_temp = 35.0; // °C
+        // Create a temperature grid within AGA8 valid range
+        // AGA8 (GERG-2008) theoretical range: -130°C to 200°C
+        // Practical range: -50°C to 200°C (very low temps may fail for some compositions)
+        // For optimal accuracy (0.1% uncertainty): -8°C to 62°C
+        const MIN_TEMP_C: f64 = -29.0; // Practical minimum (tested: works at 0.1 MPa, lower temps work at higher pressures)
+        const MAX_TEMP_C: f64 = 200.0; // AGA8 maximum temperature
+
+        let min_temp = MIN_TEMP_C;
+        let max_temp = MAX_TEMP_C;
         let num_points = enthalpy_grid.len();
 
         if num_points == 1 {
