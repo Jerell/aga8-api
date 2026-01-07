@@ -1,4 +1,6 @@
-use aga8_api::models::{Composition, CriticalPoint, PhaseBoundaries, ThermodynamicPoint};
+use aga8_api::models::{
+    Composition, CriticalPoint, EquationOfState, PhaseBoundaries, ThermodynamicPoint,
+};
 use aga8_api::tab_file::TabFileFormatter;
 
 fn create_test_composition() -> Composition {
@@ -35,15 +37,15 @@ fn create_test_point() -> ThermodynamicPoint {
         d_rho_gas_dt: -0.00722354,
         d_rho_liq_dt: -4.7006394,
         rs: 1.0,
-        gas_viscosity: 1.29447e-5,
-        liquid_viscosity: 0.000148339,
+        gas_viscosity: 0.0,    // Not available from aga8
+        liquid_viscosity: 0.0, // Not available from aga8
         gas_cp: 806.095759,
         liquid_cp: 1865.59489,
         gas_enthalpy: -38093.301,
         liquid_enthalpy: -349375.58,
-        gas_thermal_conductivity: 0.014448240,
-        liquid_thermal_conductivity: 0.132125757,
-        surface_tension: 0.009313488,
+        gas_thermal_conductivity: 0.0,    // Not available from aga8
+        liquid_thermal_conductivity: 0.0, // Not available from aga8
+        surface_tension: 0.0,             // Not available from aga8
         gas_entropy: -97.595648,
         liquid_entropy: -1890.9995,
     }
@@ -59,6 +61,7 @@ fn test_tab_file_header() {
     let temperature_grid = vec![-20.0, -19.444444];
     let points = vec![create_test_point()];
 
+    let eos = EquationOfState::Gerg2008;
     let output = TabFileFormatter::format(
         &composition,
         &critical,
@@ -66,6 +69,7 @@ fn test_tab_file_header() {
         &pressure_grid,
         &temperature_grid,
         &points,
+        &eos,
     );
 
     // Check header contains key elements
@@ -101,6 +105,7 @@ fn test_tab_file_critical_point() {
     let temperature_grid = vec![20.0];
     let points = vec![];
 
+    let eos = EquationOfState::Gerg2008;
     let output = TabFileFormatter::format(
         &composition,
         &critical,
@@ -108,6 +113,7 @@ fn test_tab_file_critical_point() {
         &pressure_grid,
         &temperature_grid,
         &points,
+        &eos,
     );
 
     assert!(
@@ -138,6 +144,7 @@ fn test_tab_file_phase_boundaries() {
     let temperature_grid = vec![20.0];
     let points = vec![];
 
+    let eos = EquationOfState::Gerg2008;
     let output = TabFileFormatter::format(
         &composition,
         &critical,
@@ -145,6 +152,7 @@ fn test_tab_file_phase_boundaries() {
         &pressure_grid,
         &temperature_grid,
         &points,
+        &eos,
     );
 
     assert!(
@@ -176,6 +184,7 @@ fn test_tab_file_data_point() {
     let point = create_test_point();
     let points = vec![point];
 
+    let eos = EquationOfState::Gerg2008;
     let output = TabFileFormatter::format(
         &composition,
         &critical,
@@ -183,6 +192,7 @@ fn test_tab_file_data_point() {
         &pressure_grid,
         &temperature_grid,
         &points,
+        &eos,
     );
 
     assert!(
@@ -223,6 +233,7 @@ fn test_tab_file_columns() {
     let temperature_grid = vec![20.0];
     let points = vec![];
 
+    let eos = EquationOfState::Gerg2008;
     let output = TabFileFormatter::format(
         &composition,
         &critical,
@@ -230,6 +241,7 @@ fn test_tab_file_columns() {
         &pressure_grid,
         &temperature_grid,
         &points,
+        &eos,
     );
 
     assert!(
@@ -256,6 +268,7 @@ fn test_data_point_serialization() {
     let temperature_grid = vec![point.temperature];
     let points = vec![point];
 
+    let eos = EquationOfState::Gerg2008;
     let output = TabFileFormatter::format(
         &composition,
         &critical,
@@ -263,6 +276,7 @@ fn test_data_point_serialization() {
         &pressure_grid,
         &temperature_grid,
         &points,
+        &eos,
     );
 
     // Find the PVTTABLE POINT line
@@ -325,21 +339,22 @@ fn test_tab_file_multiple_points() {
                 d_rho_gas_dt: -0.007,
                 d_rho_liq_dt: -4.7,
                 rs: 1.0,
-                gas_viscosity: 1.29e-5,
-                liquid_viscosity: 0.000148,
+                gas_viscosity: 0.0,    // Not available from aga8
+                liquid_viscosity: 0.0, // Not available from aga8
                 gas_cp: 806.0,
                 liquid_cp: 1865.0,
                 gas_enthalpy: -38093.0,
                 liquid_enthalpy: -349375.0,
-                gas_thermal_conductivity: 0.0144,
-                liquid_thermal_conductivity: 0.132,
-                surface_tension: 0.0093,
+                gas_thermal_conductivity: 0.0, // Not available from aga8
+                liquid_thermal_conductivity: 0.0, // Not available from aga8
+                surface_tension: 0.0,          // Not available from aga8
                 gas_entropy: -97.6,
                 liquid_entropy: -1891.0,
             });
         }
     }
 
+    let eos = EquationOfState::Gerg2008;
     let output = TabFileFormatter::format(
         &composition,
         &critical,
@@ -347,6 +362,7 @@ fn test_tab_file_multiple_points() {
         &pressure_grid,
         &temperature_grid,
         &points,
+        &eos,
     );
 
     // Count PVTTABLE POINT lines

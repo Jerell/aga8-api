@@ -32,6 +32,26 @@ pub struct EnthalpyRange {
     pub points: usize,
 }
 
+/// Equation of state to use for calculations
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum EquationOfState {
+    /// GERG-2008 equation of state (default)
+    #[default]
+    Gerg2008,
+    /// AGA8 DETAIL equation of state
+    Aga8Detail,
+}
+
+impl From<&str> for EquationOfState {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "aga8detail" | "aga8_detail" | "detail" => EquationOfState::Aga8Detail,
+            _ => EquationOfState::Gerg2008, // Default to GERG-2008
+        }
+    }
+}
+
 /// Request for generating thermodynamic data
 #[derive(Debug, Clone, Serialize, Deserialize, Object)]
 pub struct ThermodynamicDataRequest {
@@ -41,6 +61,21 @@ pub struct ThermodynamicDataRequest {
     pub pressure_range: PressureRange,
     /// Enthalpy range
     pub enthalpy_range: EnthalpyRange,
+    /// Equation of state to use: "gerg2008" (default) or "aga8detail"
+    #[serde(default = "default_eos_string")]
+    #[oai(default = "default_eos_string")]
+    pub equation_of_state: String,
+}
+
+fn default_eos_string() -> String {
+    "gerg2008".to_string()
+}
+
+impl ThermodynamicDataRequest {
+    /// Get the equation of state enum from the string field
+    pub fn eos(&self) -> EquationOfState {
+        EquationOfState::from(self.equation_of_state.as_str())
+    }
 }
 
 /// Critical point data
@@ -125,6 +160,8 @@ pub struct ThermodynamicData {
     pub pressure_grid: Vec<f64>,
     /// Temperature grid values
     pub temperature_grid: Vec<f64>,
+    /// Equation of state used
+    pub equation_of_state: EquationOfState,
 }
 
 impl Composition {

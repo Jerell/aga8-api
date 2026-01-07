@@ -1,4 +1,6 @@
-use crate::models::{Composition, CriticalPoint, PhaseBoundaries, ThermodynamicPoint};
+use crate::models::{
+    Composition, CriticalPoint, EquationOfState, PhaseBoundaries, ThermodynamicPoint,
+};
 
 /// Error type for aga8 calculations
 #[derive(Debug, thiserror::Error)]
@@ -11,6 +13,45 @@ pub enum Aga8Error {
     PhaseBoundaryError(String),
     #[error("Component not supported: {0}")]
     UnsupportedComponent(String),
+}
+
+/// Get molecular weight (kg/mol) for a component name
+/// Supports all 21 components in the aga8 crate
+fn component_molecular_weight(name: &str) -> f64 {
+    match name.to_uppercase().as_str() {
+        "CH4" | "METHANE" => 0.016043,                   // CH4
+        "N2" | "NITROGEN" => 0.0280134,                  // N2
+        "CO2" | "CARBON_DIOXIDE" => 0.0440098,           // CO2
+        "C2H6" | "ETHANE" => 0.0300696,                  // C2H6
+        "C3H8" | "PROPANE" => 0.0440956,                 // C3H8
+        "IC4H10" | "ISOBUTANE" => 0.0581222,             // i-C4H10
+        "NC4H10" | "N_BUTANE" | "BUTANE" => 0.0581222,   // n-C4H10
+        "IC5H12" | "ISOPENTANE" => 0.0721488,            // i-C5H12
+        "NC5H12" | "N_PENTANE" | "PENTANE" => 0.0721488, // n-C5H12
+        "C6H14" | "HEXANE" => 0.0861754,                 // C6H14
+        "C7H16" | "HEPTANE" => 0.1002019,                // C7H16
+        "C8H18" | "OCTANE" => 0.1142285,                 // C8H18
+        "C9H20" | "NONANE" => 0.1282551,                 // C9H20
+        "C10H22" | "DECANE" => 0.1422817,                // C10H22
+        "H2" | "HYDROGEN" => 0.00201588,                 // H2
+        "O2" | "OXYGEN" => 0.0319988,                    // O2
+        "CO" | "CARBON_MONOXIDE" => 0.0280101,           // CO
+        "H2O" | "WATER" => 0.01801528,                   // H2O
+        "H2S" | "HYDROGEN_SULFIDE" => 0.0340809,         // H2S
+        "HE" | "HELIUM" => 0.004002602,                  // He
+        "AR" | "ARGON" => 0.039948,                      // Ar
+        _ => 0.02897,                                    // Default to air (fallback)
+    }
+}
+
+/// Calculate average molecular weight for a composition
+fn calculate_average_molecular_weight(composition: &Composition) -> f64 {
+    composition
+        .components
+        .iter()
+        .zip(composition.mole_fractions.iter())
+        .map(|(component, mole_fraction)| component_molecular_weight(component) * mole_fraction)
+        .sum()
 }
 
 /// Helper function to convert component name to aga8 component index
@@ -98,38 +139,108 @@ fn to_aga8_composition(
 /// Calculate thermodynamic properties using aga8
 pub struct Aga8Calculator;
 
+/// EOS properties structure - all values from aga8 crate
+#[allow(dead_code)] // Some fields are available from aga8 but not currently used
+struct EosProperties {
+    density_kg_m3: f64,
+    compressibility: f64,
+    enthalpy: f64,       // J/mol
+    entropy: f64,        // J/(mol·K)
+    cp: f64,             // J/(mol·K) - isobaric heat capacity
+    cv: f64,             // J/(mol·K) - isochoric heat capacity
+    dp_dd: f64,          // kPa/(mol/l)
+    dp_dt: f64,          // kPa/K
+    speed_of_sound: f64, // m/s
+    gibbs_energy: f64,   // J/mol
+    joule_thomson: f64,  // K/kPa
+    kappa: f64,          // Isentropic exponent
+}
+
 impl Aga8Calculator {
     /// Calculate critical point for a given composition
-    pub fn calculate_critical_point(composition: &Composition) -> Result<CriticalPoint, Aga8Error> {
+    /// Uses iterative search to find critical temperature and pressure
+    pub fn calculate_critical_point(
+        composition: &Composition,
+        eos: &EquationOfState,
+    ) -> Result<CriticalPoint, Aga8Error> {
         composition
             .validate()
             .map_err(Aga8Error::InvalidComposition)?;
 
         let aga8_comp = to_aga8_composition(composition)?;
 
-        // Use aga8 to calculate critical properties
-        // Note: aga8 may not have a direct critical point calculation,
-        // so we may need to use an iterative approach or use the Detail struct
-        // For now, we'll use a simplified approach with Detail
+        // Critical point is where (dp/dd)_T = 0 and (d²p/dd²)_T = 0
+        // We'll search for the temperature and pressure where compressibility
+        // and density derivatives indicate critical behavior
+        // This is a simplified approach - full critical point calculation
+        // would require solving the full criticality conditions
 
-        // Create a Detail instance and try to find critical point
-        // This is a placeholder - actual implementation may vary based on aga8 API
-        let mut detail = aga8::detail::Detail::new();
-        detail.set_composition(&aga8_comp).map_err(|e| {
-            Aga8Error::CalculationFailed(format!("Failed to set composition: {:?}", e))
-        })?;
+        // Search for critical point by calling aga8 EOS at various P-T conditions
+        // Critical point is where compressibility is minimum
+        // We iterate through temperature and pressure ranges, calling aga8 at each point
+        let mut best_t = 200.0; // °C
+        let mut best_p = 5_000_000.0; // Pa
+        let mut min_z = f64::MAX;
 
-        // Try to calculate critical point
-        // If aga8 doesn't provide direct critical point calculation,
-        // we may need to use an iterative method or approximation
-        // For now, using a reasonable default that will be replaced
-        // when we understand the actual aga8 API better
+        // Search temperature and pressure ranges using aga8
+        for t_c in (0..=200).step_by(5) {
+            let t_k = t_c as f64 + 273.15;
 
-        // Placeholder - will be replaced with actual aga8 calculation
-        Ok(CriticalPoint {
-            pressure: 7_681_406.0,   // Pa
-            temperature: 30.7845310, // °C
-        })
+            for p_pa in (1_000_000..=15_000_000).step_by(500_000) {
+                match eos {
+                    EquationOfState::Gerg2008 => {
+                        let mut gerg = aga8::gerg2008::Gerg2008::new();
+                        let _ = gerg.set_composition(&aga8_comp);
+                        gerg.p = p_pa as f64;
+                        gerg.t = t_k;
+                        if gerg.density(0).is_ok() {
+                            gerg.properties();
+                            // Use aga8's compressibility to find critical point
+                            if gerg.z < min_z && gerg.z > 0.1 {
+                                min_z = gerg.z;
+                                best_t = t_c as f64;
+                                best_p = p_pa as f64;
+                            }
+                        }
+                    }
+                    EquationOfState::Aga8Detail => {
+                        let mut detail = aga8::detail::Detail::new();
+                        if detail.set_composition(&aga8_comp).is_ok() {
+                            detail.p = p_pa as f64;
+                            detail.t = t_k;
+                            if detail.density().is_ok() {
+                                detail.properties();
+                                // Use aga8's compressibility to find critical point
+                                if detail.z < min_z && detail.z > 0.1 {
+                                    min_z = detail.z;
+                                    best_t = t_c as f64;
+                                    best_p = p_pa as f64;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If aga8 calculations found a reasonable critical point, use it
+        if min_z < 0.5 && best_t > 0.0 {
+            Ok(CriticalPoint {
+                pressure: best_p,
+                temperature: best_t,
+            })
+        } else {
+            // Fallback: use simple estimates when aga8 search doesn't find clear critical point
+            // This is only used when iterative aga8 calls don't yield a result
+            let avg_mw = calculate_average_molecular_weight(composition);
+            let t_crit_est = 200.0 - (avg_mw - 0.020) * 1000.0;
+            let p_crit_est = 5_000_000.0 + (avg_mw - 0.020) * 50_000_000.0;
+
+            Ok(CriticalPoint {
+                pressure: p_crit_est.clamp(1_000_000.0, 15_000_000.0),
+                temperature: t_crit_est.clamp(-50.0, 200.0),
+            })
+        }
     }
 
     /// Calculate phase boundaries
@@ -137,6 +248,7 @@ impl Aga8Calculator {
         composition: &Composition,
         temperature_grid: &[f64],
         pressure_grid: &[f64],
+        eos: &EquationOfState,
     ) -> Result<PhaseBoundaries, Aga8Error> {
         composition
             .validate()
@@ -144,28 +256,26 @@ impl Aga8Calculator {
 
         let aga8_comp = to_aga8_composition(composition)?;
 
-        // Calculate bubble and dew points
-        // This requires iterative calculations with aga8
-        // For now, using placeholder implementations
+        // Calculate bubble and dew points using iterative calculations
 
         let bubble_pressures: Vec<f64> = temperature_grid
             .iter()
-            .map(|&t| Self::calculate_bubble_pressure(&aga8_comp, t))
+            .map(|&t| Self::calculate_bubble_pressure(&aga8_comp, t, eos))
             .collect();
 
         let bubble_temperatures: Vec<f64> = pressure_grid
             .iter()
-            .map(|&p| Self::calculate_bubble_temperature(&aga8_comp, p))
+            .map(|&p| Self::calculate_bubble_temperature(&aga8_comp, p, eos))
             .collect();
 
         let dew_pressures: Vec<f64> = temperature_grid
             .iter()
-            .map(|&t| Self::calculate_dew_pressure(&aga8_comp, t))
+            .map(|&t| Self::calculate_dew_pressure(&aga8_comp, t, eos))
             .collect();
 
         let dew_temperatures: Vec<f64> = pressure_grid
             .iter()
-            .map(|&p| Self::calculate_dew_temperature(&aga8_comp, p))
+            .map(|&p| Self::calculate_dew_temperature(&aga8_comp, p, eos))
             .collect();
 
         Ok(PhaseBoundaries {
@@ -181,6 +291,7 @@ impl Aga8Calculator {
         composition: &Composition,
         pressure: f64,
         temperature: f64,
+        eos: &EquationOfState,
     ) -> Result<ThermodynamicPoint, Aga8Error> {
         composition
             .validate()
@@ -188,14 +299,8 @@ impl Aga8Calculator {
 
         let aga8_comp = to_aga8_composition(composition)?;
 
-        // Use aga8 Detail to calculate properties
-        let mut detail = aga8::detail::Detail::new();
-        detail.set_composition(&aga8_comp).map_err(|e| {
-            Aga8Error::CalculationFailed(format!("Failed to set composition: {:?}", e))
-        })?;
-
-        // Validate pressure and temperature are within AGA8 valid range
-        // AGA8 (GERG-2008) theoretical ranges:
+        // Validate pressure and temperature are within valid range
+        // Both GERG-2008 and AGA8 DETAIL have similar ranges:
         // - Temperature: -130°C to 200°C (Region 2, broader range)
         //   For optimal accuracy (0.1% uncertainty): -8°C to 62°C (Region 1)
         // - Pressure: Up to 275 MPa (27,500,000 Pa)
@@ -210,102 +315,181 @@ impl Aga8Calculator {
         const MIN_TEMPERATURE_C: f64 = -29.0; // -29°C (practical minimum - tested: works at 0.1 MPa, lower temps work at higher pressures)
         const MAX_TEMPERATURE_C: f64 = 200.0; // 200°C (AGA8 maximum)
 
-        if pressure < MIN_PRESSURE_PA || pressure > MAX_PRESSURE_PA {
+        if !(MIN_PRESSURE_PA..=MAX_PRESSURE_PA).contains(&pressure) {
             return Err(Aga8Error::CalculationFailed(format!(
-                "Pressure {} Pa is outside valid AGA8 range ({} - {} Pa)",
+                "Pressure {} Pa is outside valid range ({} - {} Pa)",
                 pressure, MIN_PRESSURE_PA, MAX_PRESSURE_PA
             )));
         }
 
-        if temperature < MIN_TEMPERATURE_C || temperature > MAX_TEMPERATURE_C {
+        if !(MIN_TEMPERATURE_C..=MAX_TEMPERATURE_C).contains(&temperature) {
             return Err(Aga8Error::CalculationFailed(format!(
-                "Temperature {}°C is outside valid AGA8 range ({} - {}°C)",
+                "Temperature {}°C is outside valid range ({} - {}°C)",
                 temperature, MIN_TEMPERATURE_C, MAX_TEMPERATURE_C
             )));
         }
 
         // Convert temperature from Celsius to Kelvin
         let temp_kelvin = temperature + 273.15;
-        detail.p = pressure;
-        detail.t = temp_kelvin;
 
-        // Calculate density and properties
-        // If density calculation fails, return an error (no fallback)
-        let density_result = detail.density();
-        if density_result.is_err() {
-            return Err(Aga8Error::CalculationFailed(format!(
-                "Density calculation failed at P={} Pa, T={}°C: {:?}. This may indicate conditions outside AGA8's valid range or near phase boundaries.",
-                pressure,
-                temperature,
-                density_result.unwrap_err()
-            )));
-        }
+        // Calculate properties using the selected equation of state
+        // Get all properties directly from aga8 crate
+        let eos_props = match eos {
+            EquationOfState::Gerg2008 => {
+                Self::calculate_with_gerg2008(&aga8_comp, pressure, temp_kelvin, composition)?
+            }
+            EquationOfState::Aga8Detail => {
+                Self::calculate_with_aga8_detail(&aga8_comp, pressure, temp_kelvin, composition)?
+            }
+        };
 
-        detail.properties(); // Modifies detail in-place, returns ()
+        // Calculate density derivatives from aga8's pressure derivatives
+        // aga8 provides: dp_dd (kPa/(mol/l)) and dp_dt (kPa/K)
+        // We need: d_rho_dp and d_rho_dt (density derivatives)
+        // These are related by: d_rho_dp = 1 / (dp_dd) after unit conversion
+        let avg_mw = calculate_average_molecular_weight(composition);
 
-        // Extract properties from detail
-        // Note: aga8 provides density (d), compressibility (z), etc.
-        // We need to map these to our ThermodynamicPoint structure
-        // Some properties may need to be calculated or approximated
+        // Convert aga8's dp_dd from kPa/(mol/l) to Pa/(mol/m³) for unit consistency
+        // 1 kPa/(mol/l) = 1,000,000 Pa/(mol/m³)
+        let dp_dd_pa_per_mol_m3 = eos_props.dp_dd * 1_000_000.0;
 
-        let density = detail.d; // kg/m³
-        let compressibility = detail.z;
+        // Density derivative w.r.t. pressure: d(rho_mass)/dp = MW / (dp/dd_mol)
+        // This uses aga8's dp_dd directly - just unit conversion and inverse relationship
+        let d_rho_dp = avg_mw / dp_dd_pa_per_mol_m3;
 
-        // Calculate derivatives (these may need numerical differentiation)
-        // For now, using approximations
-        let d_rho_dp = density / (pressure * compressibility); // Approximate derivative
-        let d_rho_dt = -density * 0.001; // Approximate thermal expansion
+        // Density derivative w.r.t. temperature: uses aga8's dp_dt and dp_dd
+        // d_rho_dt = -rho * (dp_dt / dp_dd) / T (thermodynamic relationship)
+        // All values come from aga8 - we're just applying the mathematical relationship
+        let dp_dt_pa_per_k = eos_props.dp_dt * 1000.0; // Unit conversion: kPa/K -> Pa/K
+        let d_rho_dt = -(eos_props.density_kg_m3 / temp_kelvin)
+            * (dp_dt_pa_per_k / dp_dd_pa_per_mol_m3)
+            * avg_mw;
 
-        // For two-phase calculations, we need both gas and liquid properties
-        // aga8 Detail typically provides single-phase properties
-        // We may need to determine phase and calculate accordingly
+        // For liquid phase properties: AGA8/GERG-2008 are primarily for gas phase
+        // Use same values from aga8 for liquid (two-phase calculations would require additional EOS)
+        let liquid_density = eos_props.density_kg_m3;
 
-        // Placeholder values for liquid phase (will need proper two-phase calculation)
-        let liquid_density = density * 100.0; // Rough approximation
-        let d_rho_liq_dp = d_rho_dp * 0.1;
-        let d_rho_liq_dt = d_rho_dt * 0.1;
+        // Convert cp from aga8's J/(mol·K) to J/(kg·K) - just unit conversion
+        let gas_cp_mass = eos_props.cp / avg_mw; // J/(kg·K)
+        let liquid_cp_mass = gas_cp_mass; // Use same from aga8
 
-        // Viscosity, heat capacity, etc. from aga8
-        // These may be available in detail or need separate calculations
-        let gas_viscosity = 1.29447e-5; // Placeholder - need to get from aga8
-        let liquid_viscosity = 0.000148339; // Placeholder
-        let gas_cp = 806.0; // Placeholder - need to get from aga8
-        let liquid_cp = 1865.0; // Placeholder
-
-        // Enthalpy and entropy
-        let gas_enthalpy = detail.h; // J/mol
-        let liquid_enthalpy = gas_enthalpy * 0.1; // Placeholder
-        let gas_entropy = detail.s; // J/(mol·K)
-        let liquid_entropy = gas_entropy * 0.1; // Placeholder
-
-        // Thermal conductivity
-        let gas_thermal_conductivity = 0.0144; // Placeholder
-        let liquid_thermal_conductivity = 0.132; // Placeholder
-
-        // Surface tension
-        let surface_tension = 0.0093; // Placeholder
+        // Properties not provided by aga8 crate - set to zero
+        // Note: aga8 does not provide viscosity, thermal conductivity, or surface tension
+        let gas_viscosity = 0.0; // Not available from aga8
+        let liquid_viscosity = 0.0; // Not available from aga8
+        let gas_thermal_conductivity = 0.0; // Not available from aga8
+        let liquid_thermal_conductivity = 0.0; // Not available from aga8
+        let surface_tension = 0.0; // Not available from aga8
 
         Ok(ThermodynamicPoint {
             pressure,
             temperature,
-            gas_density: density,
+            gas_density: eos_props.density_kg_m3,
             liquid_density,
             d_rho_gas_dp: d_rho_dp,
-            d_rho_liq_dp: d_rho_liq_dp,
+            d_rho_liq_dp: d_rho_dp,
             d_rho_gas_dt: d_rho_dt,
-            d_rho_liq_dt: d_rho_liq_dt,
-            rs: 1.0, // Solution gas-oil ratio - may need separate calculation
+            d_rho_liq_dt: d_rho_dt,
+            rs: 1.0, // Solution gas-oil ratio (not applicable for natural gas)
             gas_viscosity,
             liquid_viscosity,
-            gas_cp,
-            liquid_cp,
-            gas_enthalpy,
-            liquid_enthalpy,
+            gas_cp: gas_cp_mass,
+            liquid_cp: liquid_cp_mass,
+            gas_enthalpy: eos_props.enthalpy,
+            liquid_enthalpy: eos_props.enthalpy, // Use same for now
             gas_thermal_conductivity,
             liquid_thermal_conductivity,
             surface_tension,
-            gas_entropy,
-            liquid_entropy,
+            gas_entropy: eos_props.entropy,
+            liquid_entropy: eos_props.entropy, // Use same for now
+        })
+    }
+
+    /// Calculate properties using GERG-2008
+    fn calculate_with_gerg2008(
+        composition: &aga8::composition::Composition,
+        pressure: f64,
+        temp_kelvin: f64,
+        our_composition: &Composition,
+    ) -> Result<EosProperties, Aga8Error> {
+        let mut gerg = aga8::gerg2008::Gerg2008::new();
+        let _ = gerg.set_composition(composition);
+        gerg.p = pressure;
+        gerg.t = temp_kelvin;
+
+        // iflag: 0 = normal calculation, 1 = use initial guess
+        gerg.density(0).map_err(|e| {
+            Aga8Error::CalculationFailed(format!("GERG-2008 density calculation failed: {:?}", e))
+        })?;
+
+        gerg.properties();
+
+        // GERG-2008 provides all properties directly after calling properties()
+        // Get molar density in mol/l, convert to kg/m³
+        let density_mol_l = gerg.d; // mol/l
+        let density_mol_m3 = density_mol_l * 1000.0; // Convert to mol/m³
+
+        // Calculate average molecular weight for conversion from molar to mass density
+        let avg_mw = calculate_average_molecular_weight(our_composition);
+        let density_kg_m3 = density_mol_m3 * avg_mw;
+
+        Ok(EosProperties {
+            density_kg_m3,
+            compressibility: gerg.z,
+            enthalpy: gerg.h,       // J/mol
+            entropy: gerg.s,        // J/(mol·K)
+            cp: gerg.cp,            // J/(mol·K)
+            cv: gerg.cv,            // J/(mol·K)
+            dp_dd: gerg.dp_dd,      // kPa/(mol/l)
+            dp_dt: gerg.dp_dt,      // kPa/K
+            speed_of_sound: gerg.w, // m/s
+            gibbs_energy: gerg.g,   // J/mol
+            joule_thomson: gerg.jt, // K/kPa
+            kappa: gerg.kappa,      // Isentropic exponent
+        })
+    }
+
+    /// Calculate properties using AGA8 DETAIL
+    fn calculate_with_aga8_detail(
+        composition: &aga8::composition::Composition,
+        pressure: f64,
+        temp_kelvin: f64,
+        _our_composition: &Composition,
+    ) -> Result<EosProperties, Aga8Error> {
+        let mut detail = aga8::detail::Detail::new();
+        detail.set_composition(composition).map_err(|e| {
+            Aga8Error::CalculationFailed(format!("Failed to set composition: {:?}", e))
+        })?;
+
+        detail.p = pressure;
+        detail.t = temp_kelvin;
+
+        detail.density().map_err(|e| {
+            Aga8Error::CalculationFailed(format!("AGA8 DETAIL density calculation failed: {:?}", e))
+        })?;
+
+        detail.properties();
+
+        // AGA8 DETAIL provides all properties directly after calling properties()
+        // Get molar density in mol/l, convert to kg/m³
+        let density_mol_l = detail.d; // mol/l
+        let density_mol_m3 = density_mol_l * 1000.0; // Convert to mol/m³
+        let molar_mass_kg_mol = detail.mm / 1000.0; // Convert g/mol to kg/mol
+        let density_kg_m3 = density_mol_m3 * molar_mass_kg_mol;
+
+        Ok(EosProperties {
+            density_kg_m3,
+            compressibility: detail.z,
+            enthalpy: detail.h,       // J/mol
+            entropy: detail.s,        // J/(mol·K)
+            cp: detail.cp,            // J/(mol·K)
+            cv: detail.cv,            // J/(mol·K)
+            dp_dd: detail.dp_dd,      // kPa/(mol/l)
+            dp_dt: detail.dp_dt,      // kPa/K
+            speed_of_sound: detail.w, // m/s
+            gibbs_energy: detail.g,   // J/mol
+            joule_thomson: detail.jt, // K/kPa
+            kappa: detail.kappa,      // Isentropic exponent
         })
     }
 
@@ -313,28 +497,46 @@ impl Aga8Calculator {
     fn calculate_bubble_pressure(
         composition: &aga8::composition::Composition,
         temperature: f64,
+        eos: &EquationOfState,
     ) -> f64 {
-        // This requires iterative calculation with aga8
-        // For now, using a placeholder
-        // In real implementation, would use aga8 Detail with iterative pressure search
+        // Calculate bubble pressure using iterative search with the selected EOS
         let temp_kelvin = temperature + 273.15;
-        let mut detail = aga8::detail::Detail::new();
-        let _ = detail.set_composition(composition); // Ignore errors for placeholder
-        detail.t = temp_kelvin;
 
-        // Try to find bubble point by iterating pressure
-        // This is simplified - actual implementation would use proper phase equilibrium
-        for p in (100_000..=10_000_000).step_by(100_000) {
-            detail.p = p as f64;
-            if let Ok(_) = detail.density() {
-                // Check if we're at bubble point (simplified check)
-                if detail.z < 0.3 {
-                    return p as f64;
+        match eos {
+            EquationOfState::Gerg2008 => {
+                let mut gerg = aga8::gerg2008::Gerg2008::new();
+                let _ = gerg.set_composition(composition);
+                gerg.t = temp_kelvin;
+
+                for p in (100_000..=10_000_000).step_by(100_000) {
+                    gerg.p = p as f64;
+                    if gerg.density(0).is_ok() {
+                        gerg.properties();
+                        if gerg.z < 0.3 {
+                            return p as f64;
+                        }
+                    }
+                }
+            }
+            EquationOfState::Aga8Detail => {
+                let mut detail = aga8::detail::Detail::new();
+                if detail.set_composition(composition).is_ok() {
+                    detail.t = temp_kelvin;
+                    for p in (100_000..=10_000_000).step_by(100_000) {
+                        detail.p = p as f64;
+                        if detail.density().is_ok() {
+                            detail.properties();
+                            if detail.z < 0.3 {
+                                return p as f64;
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Fallback
+        // Fallback when aga8 calls don't find bubble point
+        // This is a simple estimate - ideally all values would come from aga8
         493_595_079.0 * (1.0 - (temperature + 239.0) / 270.0)
     }
 
@@ -342,23 +544,44 @@ impl Aga8Calculator {
     fn calculate_bubble_temperature(
         composition: &aga8::composition::Composition,
         pressure: f64,
+        eos: &EquationOfState,
     ) -> f64 {
         // Similar to bubble pressure but iterate temperature
-        let mut detail = aga8::detail::Detail::new();
-        let _ = detail.set_composition(composition); // Ignore errors for placeholder
-        detail.p = pressure;
+        match eos {
+            EquationOfState::Gerg2008 => {
+                let mut gerg = aga8::gerg2008::Gerg2008::new();
+                let _ = gerg.set_composition(composition);
+                gerg.p = pressure;
 
-        // Iterate temperature
-        for t_k in (150..=500).step_by(5) {
-            detail.t = t_k as f64;
-            if let Ok(_) = detail.density() {
-                if detail.z < 0.3 {
-                    return (t_k as f64) - 273.15; // Convert to Celsius
+                for t_k in (150..=500).step_by(5) {
+                    gerg.t = t_k as f64;
+                    if gerg.density(0).is_ok() {
+                        gerg.properties();
+                        if gerg.z < 0.3 {
+                            return (t_k as f64) - 273.15;
+                        }
+                    }
+                }
+            }
+            EquationOfState::Aga8Detail => {
+                let mut detail = aga8::detail::Detail::new();
+                if detail.set_composition(composition).is_ok() {
+                    detail.p = pressure;
+                    for t_k in (150..=500).step_by(5) {
+                        detail.t = t_k as f64;
+                        if detail.density().is_ok() {
+                            detail.properties();
+                            if detail.z < 0.3 {
+                                return (t_k as f64) - 273.15;
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Fallback
+        // Fallback when aga8 calls don't find bubble point
+        // This is a simple estimate - ideally all values would come from aga8
         -239.0 + (1.0 - pressure / 493_595_079.0) * 270.0
     }
 
@@ -366,46 +589,91 @@ impl Aga8Calculator {
     fn calculate_dew_pressure(
         composition: &aga8::composition::Composition,
         temperature: f64,
+        eos: &EquationOfState,
     ) -> f64 {
         // Similar to bubble pressure
         let temp_kelvin = temperature + 273.15;
-        let mut detail = aga8::detail::Detail::new();
-        let _ = detail.set_composition(composition); // Ignore errors for placeholder
-        detail.t = temp_kelvin;
 
-        for p in (100_000..=10_000_000).step_by(100_000) {
-            detail.p = p as f64;
-            if let Ok(_) = detail.density() {
-                if detail.z > 0.7 {
-                    return p as f64;
+        match eos {
+            EquationOfState::Gerg2008 => {
+                let mut gerg = aga8::gerg2008::Gerg2008::new();
+                let _ = gerg.set_composition(composition);
+                gerg.t = temp_kelvin;
+
+                for p in (100_000..=10_000_000).step_by(100_000) {
+                    gerg.p = p as f64;
+                    if gerg.density(0).is_ok() {
+                        gerg.properties();
+                        if gerg.z > 0.7 {
+                            return p as f64;
+                        }
+                    }
+                }
+            }
+            EquationOfState::Aga8Detail => {
+                let mut detail = aga8::detail::Detail::new();
+                if detail.set_composition(composition).is_ok() {
+                    detail.t = temp_kelvin;
+                    for p in (100_000..=10_000_000).step_by(100_000) {
+                        detail.p = p as f64;
+                        if detail.density().is_ok() {
+                            detail.properties();
+                            if detail.z > 0.7 {
+                                return p as f64;
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Fallback
-        85_858.5859 * (1.0 + (temperature + 90.0) / 120.0)
+        // Fallback when aga8 calls don't find dew point
+        // This is a simple estimate - ideally all values would come from aga8
+        85_858.585_9 * (1.0 + (temperature + 90.0) / 120.0)
     }
 
     /// Helper: Calculate dew temperature at given pressure
     fn calculate_dew_temperature(
         composition: &aga8::composition::Composition,
         pressure: f64,
+        eos: &EquationOfState,
     ) -> f64 {
         // Similar to bubble temperature
-        let mut detail = aga8::detail::Detail::new();
-        let _ = detail.set_composition(composition); // Ignore errors for placeholder
-        detail.p = pressure;
+        match eos {
+            EquationOfState::Gerg2008 => {
+                let mut gerg = aga8::gerg2008::Gerg2008::new();
+                let _ = gerg.set_composition(composition);
+                gerg.p = pressure;
 
-        for t_k in (150..=500).step_by(5) {
-            detail.t = t_k as f64;
-            if let Ok(_) = detail.density() {
-                if detail.z > 0.7 {
-                    return (t_k as f64) - 273.15;
+                for t_k in (150..=500).step_by(5) {
+                    gerg.t = t_k as f64;
+                    if gerg.density(0).is_ok() {
+                        gerg.properties();
+                        if gerg.z > 0.7 {
+                            return (t_k as f64) - 273.15;
+                        }
+                    }
+                }
+            }
+            EquationOfState::Aga8Detail => {
+                let mut detail = aga8::detail::Detail::new();
+                if detail.set_composition(composition).is_ok() {
+                    detail.p = pressure;
+                    for t_k in (150..=500).step_by(5) {
+                        detail.t = t_k as f64;
+                        if detail.density().is_ok() {
+                            detail.properties();
+                            if detail.z > 0.7 {
+                                return (t_k as f64) - 273.15;
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Fallback
-        -90.0 + (pressure / 85_858.5859 - 1.0) * 120.0
+        // Fallback when aga8 calls don't find dew point
+        // This is a simple estimate - ideally all values would come from aga8
+        -90.0 + (pressure / 85_858.585_9 - 1.0) * 120.0
     }
 }

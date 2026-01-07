@@ -1,4 +1,6 @@
-use crate::models::{Composition, CriticalPoint, PhaseBoundaries, ThermodynamicPoint};
+use crate::models::{
+    Composition, CriticalPoint, EquationOfState, PhaseBoundaries, ThermodynamicPoint,
+};
 
 /// Format thermodynamic data as a Multiflash tab file
 pub struct TabFileFormatter;
@@ -12,6 +14,7 @@ impl TabFileFormatter {
         pressure_grid: &[f64],
         temperature_grid: &[f64],
         points: &[ThermodynamicPoint],
+        eos: &EquationOfState,
     ) -> String {
         let mut output = String::new();
 
@@ -22,12 +25,20 @@ impl TabFileFormatter {
             .map(|c| c.as_str())
             .collect::<Vec<_>>()
             .join(" , ");
-        let label = format!("AGA8_{}", component_list.replace(" ", "_"));
+        let eos_label = match eos {
+            EquationOfState::Gerg2008 => "GERG2008",
+            EquationOfState::Aga8Detail => "AGA8_DETAIL",
+        };
+        let label = format!("{}_{}", eos_label, component_list.replace(" ", "_"));
         output.push_str(&format!("PVTTABLE LABEL = {} ,  PHASE = TWO, \\\n", label));
         output.push_str("!\n");
         output.push_str("! Multiflash Version 7.4.08     May 2023\n");
         output.push_str("!\n");
-        output.push_str("! EOS:  AGA8 - GERG-2008                                                                          !\n");
+        let eos_name = match eos {
+            EquationOfState::Gerg2008 => "GERG-2008",
+            EquationOfState::Aga8Detail => "AGA8 DETAIL",
+        };
+        output.push_str(&format!("! EOS:  {}                                                                          !\n", eos_name));
         output.push_str("!\n");
 
         // Components
@@ -42,11 +53,37 @@ impl TabFileFormatter {
             .join(" , ");
         output.push_str(&format!("MOLES = ( {} ), \\\n", mole_str));
 
-        // Molecular weights (placeholder - should come from component database)
+        // Molecular weights from component database
         let mw_str = composition
             .components
             .iter()
-            .map(|_| "44.0098000") // Placeholder - should look up actual MW
+            .map(|c| {
+                let mw = match c.to_uppercase().as_str() {
+                    "CH4" | "METHANE" => 0.016043,
+                    "N2" | "NITROGEN" => 0.0280134,
+                    "CO2" | "CARBON_DIOXIDE" => 0.0440098,
+                    "C2H6" | "ETHANE" => 0.0300696,
+                    "C3H8" | "PROPANE" => 0.0440956,
+                    "IC4H10" | "ISOBUTANE" => 0.0581222,
+                    "NC4H10" | "N_BUTANE" | "BUTANE" => 0.0581222,
+                    "IC5H12" | "ISOPENTANE" => 0.0721488,
+                    "NC5H12" | "N_PENTANE" | "PENTANE" => 0.0721488,
+                    "C6H14" | "HEXANE" => 0.0861754,
+                    "C7H16" | "HEPTANE" => 0.1002019,
+                    "C8H18" | "OCTANE" => 0.1142285,
+                    "C9H20" | "NONANE" => 0.1282551,
+                    "C10H22" | "DECANE" => 0.1422817,
+                    "H2" | "HYDROGEN" => 0.00201588,
+                    "O2" | "OXYGEN" => 0.0319988,
+                    "CO" | "CARBON_MONOXIDE" => 0.0280101,
+                    "H2O" | "WATER" => 0.01801528,
+                    "H2S" | "HYDROGEN_SULFIDE" => 0.0340809,
+                    "HE" | "HELIUM" => 0.004002602,
+                    "AR" | "ARGON" => 0.039948,
+                    _ => 0.02897, // Default to air
+                };
+                format!("{:.9}", mw)
+            })
             .collect::<Vec<_>>()
             .join(" , ");
         output.push_str(&format!("MOLWEIGHT = ( {} ), \\\n", mw_str));
@@ -126,8 +163,6 @@ impl TabFileFormatter {
         for (i, &value) in values.iter().enumerate() {
             let value_str = if value.abs() < 1.0 {
                 format!("{:.9}", value)
-            } else if value.abs() < 1000.0 {
-                format!("{:.2}", value)
             } else {
                 format!("{:.2}", value)
             };

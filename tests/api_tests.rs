@@ -8,7 +8,7 @@ fn create_test_request() -> ThermodynamicDataRequest {
             mole_fractions: vec![0.99, 0.01],
         },
         pressure_range: PressureRange {
-            min: 100_000.0, // Minimum valid AGA8 pressure
+            min: 100_000.0, // Minimum valid pressure
             max: 850_000.0,
             points: 5,
         },
@@ -17,6 +17,7 @@ fn create_test_request() -> ThermodynamicDataRequest {
             max: 100_000.0,
             points: 10,
         },
+        equation_of_state: "gerg2008".to_string(), // Default to GERG-2008
     }
 }
 

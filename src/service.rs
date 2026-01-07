@@ -20,14 +20,15 @@ impl ThermodynamicService {
         request
             .pressure_range
             .validate()
-            .map_err(|e| Aga8Error::CalculationFailed(e))?;
+            .map_err(Aga8Error::CalculationFailed)?;
 
         // Generate grids
         let pressure_grid = request.pressure_range.generate_grid();
         let enthalpy_grid = request.enthalpy_range.generate_grid();
 
         // Calculate critical point
-        let critical_point = Aga8Calculator::calculate_critical_point(&request.composition)?;
+        let eos = request.eos();
+        let critical_point = Aga8Calculator::calculate_critical_point(&request.composition, &eos)?;
 
         // For temperature grid, we'll need to convert from enthalpy
         // This is a simplified approach - in reality, we'd need to solve for temperature
@@ -43,14 +44,19 @@ impl ThermodynamicService {
             &request.composition,
             &temperature_grid,
             &pressure_grid,
+            &eos,
         )?;
 
         // Generate thermodynamic points for the grid
         let mut points = Vec::new();
         for &pressure in &pressure_grid {
             for &temperature in &temperature_grid {
-                let point =
-                    Aga8Calculator::calculate_point(&request.composition, pressure, temperature)?;
+                let point = Aga8Calculator::calculate_point(
+                    &request.composition,
+                    pressure,
+                    temperature,
+                    &eos,
+                )?;
                 points.push(point);
             }
         }
@@ -62,6 +68,7 @@ impl ThermodynamicService {
             points,
             pressure_grid,
             temperature_grid,
+            equation_of_state: eos.clone(),
         })
     }
 
@@ -74,6 +81,7 @@ impl ThermodynamicService {
             &data.pressure_grid,
             &data.temperature_grid,
             &data.points,
+            &data.equation_of_state,
         )
     }
 

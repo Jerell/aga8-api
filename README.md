@@ -5,16 +5,6 @@ A web API for producing thermodynamic data using the AGA8 equation of state.
 This API generates thermodynamic data in the tab file format used by Multiflash.  
 The output includes all the metadata like `BUBBLEPRESSURES`, `BUBBLETEMPERATURES`, `CRITICALPRESSURE`, `CRITICALTEMPERATURE`, etc.
 
-## Features
-
-- **RESTful API** built with Poem and OpenAPI documentation
-- **Thermodynamic calculations** using the AGA8 equation of state
-- **Tab file generation** in Multiflash format
-- **Comprehensive testing** including:
-  - Unit tests for thermodynamic calculations (critical point, phase boundaries)
-  - Tests for tab file formatting and data point serialization
-  - API endpoint tests
-
 ## API Endpoints
 
 ### POST `/generate-tab-file`
@@ -38,9 +28,14 @@ Generates thermodynamic data and returns it as a tab file in Multiflash format.
     "min": -100000.0,
     "max": 100000.0,
     "points": 100
-  }
+  },
+  "equation_of_state": "gerg2008"
 }
 ```
+
+**Parameters:**
+
+- `equation_of_state` (optional, default: `"gerg2008"`): Choose between `"gerg2008"` (GERG-2008 equation of state) or `"aga8detail"` (AGA8 DETAIL equation of state)
 
 **Note:**
 
@@ -92,17 +87,39 @@ cargo test
 - `src/main.rs` - Application entry point
 - `tests/` - Comprehensive test suite
 
-## Note on AGA8 Integration
+## Properties Available from aga8 Crate
 
-The current implementation includes placeholder calculations. To integrate with the actual `aga8` crate:
+This API uses the `aga8` Rust crate which provides thermodynamic properties through two equation of state implementations:
 
-1. Replace placeholder implementations in `src/aga8_calc.rs` with actual aga8 API calls
-2. Update the calculation methods to use the aga8 crate's functions for:
-   - Critical point calculation
-   - Phase boundary calculations (bubble/dew points)
-   - Thermodynamic property calculations at given P-T conditions
+### GERG-2008 Equation of State
 
-The structure is designed to make this integration straightforward.
+- **Density** (molar, converted to mass density)
+- **Compressibility factor** (z)
+- **Enthalpy** (h) - J/mol
+- **Entropy** (s) - J/(mol·K)
+- **Isobaric heat capacity** (cp) - J/(mol·K)
+- **Isochoric heat capacity** (cv) - J/(mol·K)
+- **Pressure derivatives** (dp_dd, dp_dt) - used to calculate density derivatives
+- **Speed of sound** (w) - m/s
+- **Gibbs energy** (g) - J/mol
+- **Joule-Thomson coefficient** (jt) - K/kPa
+- **Isentropic exponent** (kappa)
+
+### AGA8 DETAIL Equation of State
+
+Provides the same properties as GERG-2008.
+
+### Properties Not Available from aga8
+
+The following properties are **not** provided by the aga8 crate and are set to zero in the output:
+
+- **Viscosity** (gas and liquid)
+- **Thermal conductivity** (gas and liquid)
+- **Surface tension**
+
+These properties would require additional correlations or separate property packages to calculate.
+
+### Tab file format
 
 ```
 PVTTABLE LABEL = CPA_99_CO2,_1_H2 ,  PHASE = TWO, \
