@@ -1,9 +1,97 @@
 # aga8-api
 
-A web api for producing thermodynamic data.
+A web API for producing thermodynamic data using the AGA8 equation of state.
 
-I intend to make a web api to output thermodynamic data in the tab file format used by Multiflash.  
-The output will include all the metadata like `BUBBLEPRESSURES`, `BUBBLETEMPERATURES`, `CRITICALPRESSURE`, `CRITICALTEMPERATURE`, etc.
+This API generates thermodynamic data in the tab file format used by Multiflash.  
+The output includes all the metadata like `BUBBLEPRESSURES`, `BUBBLETEMPERATURES`, `CRITICALPRESSURE`, `CRITICALTEMPERATURE`, etc.
+
+## Features
+
+- **RESTful API** built with Poem and OpenAPI documentation
+- **Thermodynamic calculations** using the AGA8 equation of state
+- **Tab file generation** in Multiflash format
+- **Comprehensive testing** including:
+  - Unit tests for thermodynamic calculations (critical point, phase boundaries)
+  - Tests for tab file formatting and data point serialization
+  - API endpoint tests
+
+## API Endpoints
+
+### POST `/generate-tab-file`
+
+Generates thermodynamic data and returns it as a tab file in Multiflash format.
+
+**Request Body:**
+
+```json
+{
+  "composition": {
+    "components": ["CO2", "H2"],
+    "mole_fractions": [0.99, 0.01]
+  },
+  "pressure_range": {
+    "min": 1000.0,
+    "max": 850000.0,
+    "points": 100
+  },
+  "enthalpy_range": {
+    "min": -100000.0,
+    "max": 100000.0,
+    "points": 100
+  }
+}
+```
+
+**Response:** Plain text tab file
+
+### POST `/generate-data`
+
+Generates thermodynamic data and returns it as JSON.
+
+**Request Body:** Same as `/generate-tab-file`
+
+**Response:** JSON object with thermodynamic data
+
+### GET `/health`
+
+Health check endpoint.
+
+## Running the API
+
+```bash
+cargo run
+```
+
+The API will start on `http://localhost:3000`
+API documentation (Swagger UI) is available at `http://localhost:3000/docs`
+
+## Running Tests
+
+```bash
+cargo test
+```
+
+## Project Structure
+
+- `src/models.rs` - Data models for requests and thermodynamic data
+- `src/aga8_calc.rs` - Integration layer with aga8 crate for calculations
+- `src/tab_file.rs` - Tab file formatter for Multiflash format
+- `src/service.rs` - Service layer orchestrating data generation
+- `src/api.rs` - Poem web API endpoints
+- `src/main.rs` - Application entry point
+- `tests/` - Comprehensive test suite
+
+## Note on AGA8 Integration
+
+The current implementation includes placeholder calculations. To integrate with the actual `aga8` crate:
+
+1. Replace placeholder implementations in `src/aga8_calc.rs` with actual aga8 API calls
+2. Update the calculation methods to use the aga8 crate's functions for:
+   - Critical point calculation
+   - Phase boundary calculations (bubble/dew points)
+   - Thermodynamic property calculations at given P-T conditions
+
+The structure is designed to make this integration straightforward.
 
 ```
 PVTTABLE LABEL = CPA_99_CO2,_1_H2 ,  PHASE = TWO, \

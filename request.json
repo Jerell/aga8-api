@@ -1,0 +1,16 @@
+{
+  "composition": {
+    "components": ["CO2", "H2"],
+    "mole_fractions": [0.99, 0.01]
+  },
+  "pressure_range": {
+    "min": 1000.0,
+    "max": 850000.0,
+    "points": 100
+  },
+  "enthalpy_range": {
+    "min": -100000.0,
+    "max": 100000.0,
+    "points": 100
+  }
+}
