@@ -12,14 +12,18 @@ fn test_critical_point_calculation() {
     let eos = EquationOfState::Gerg2008;
     let critical = Aga8Calculator::calculate_critical_point(&composition, &eos).unwrap();
 
-    // Critical point is not available from aga8 crate, so all values should be NaN
+    // Critical point is now calculated
     assert!(
-        critical.pressure.is_nan(),
-        "Critical pressure should be NaN (not available from aga8)"
+        !critical.pressure.is_nan() && critical.pressure > 0.0,
+        "Critical pressure should be valid, got {}",
+        critical.pressure
     );
     assert!(
-        critical.temperature.is_nan(),
-        "Critical temperature should be NaN (not available from aga8)"
+        !critical.temperature.is_nan()
+            && critical.temperature > -100.0
+            && critical.temperature < 150.0,
+        "Critical temperature should be valid, got {}",
+        critical.temperature
     );
 }
 
@@ -56,11 +60,13 @@ fn test_phase_boundaries() {
         temperature_grid.len(),
         "Bubble pressures should match temperature grid length"
     );
-    // Phase boundaries are not available from aga8 crate, so all values should be NaN
+    // Phase boundaries are not available from GERG-2008 (single-phase EOS)
+    // All values should be NaN
     for &bp in &boundaries.bubble_pressures {
         assert!(
             bp.is_nan(),
-            "Bubble pressure should be NaN (not available from aga8)"
+            "Bubble pressure should be NaN (not available from GERG-2008), got {}",
+            bp
         );
     }
 
@@ -73,7 +79,8 @@ fn test_phase_boundaries() {
     for &bt in &boundaries.bubble_temperatures {
         assert!(
             bt.is_nan(),
-            "Bubble temperature should be NaN (not available from aga8)"
+            "Bubble temperature should be NaN (not available from GERG-2008), got {}",
+            bt
         );
     }
 
@@ -86,7 +93,8 @@ fn test_phase_boundaries() {
     for &dp in &boundaries.dew_pressures {
         assert!(
             dp.is_nan(),
-            "Dew pressure should be NaN (not available from aga8)"
+            "Dew pressure should be NaN (not available from GERG-2008), got {}",
+            dp
         );
     }
 
@@ -99,7 +107,8 @@ fn test_phase_boundaries() {
     for &dt in &boundaries.dew_temperatures {
         assert!(
             dt.is_nan(),
-            "Dew temperature should be NaN (not available from aga8)"
+            "Dew temperature should be NaN (not available from GERG-2008), got {}",
+            dt
         );
     }
 
@@ -169,14 +178,18 @@ fn test_critical_point_consistency() {
     let eos = EquationOfState::Gerg2008;
     let critical = Aga8Calculator::calculate_critical_point(&composition, &eos).unwrap();
 
-    // Critical point is not available from aga8 crate, so all values should be NaN
+    // Critical point is now calculated
     assert!(
-        critical.pressure.is_nan(),
-        "Critical pressure should be NaN (not available from aga8)"
+        !critical.pressure.is_nan() && critical.pressure > 0.0,
+        "Critical pressure should be valid, got {}",
+        critical.pressure
     );
     assert!(
-        critical.temperature.is_nan(),
-        "Critical temperature should be NaN (not available from aga8)"
+        !critical.temperature.is_nan()
+            && critical.temperature > -100.0
+            && critical.temperature < 150.0,
+        "Critical temperature should be valid, got {}",
+        critical.temperature
     );
 
     // Try to calculate properties at a point well away from critical

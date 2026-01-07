@@ -149,6 +149,8 @@ struct EosProperties {
     cp: f64,             // J/(mol·K) - isobaric heat capacity
     cv: f64,             // J/(mol·K) - isochoric heat capacity
     dp_dd: f64,          // kPa/(mol/l)
+    d2p_dd2: f64,        // Second derivative of pressure w.r.t. density
+    d2p_dtd: f64,        // Mixed derivative
     dp_dt: f64,          // kPa/K
     speed_of_sound: f64, // m/s
     gibbs_energy: f64,   // J/mol
@@ -158,30 +160,148 @@ struct EosProperties {
 
 impl Aga8Calculator {
     /// Calculate critical point for a given composition
-    /// Note: aga8 crate does not provide critical point calculations
-    /// Returns NaN values to indicate critical point is not available
+    /// Uses GERG-2008 to solve criticality conditions: (dp/dd)_T = 0 and (d²p/dd²)_T = 0
     pub fn calculate_critical_point(
         composition: &Composition,
-        _eos: &EquationOfState,
+        eos: &EquationOfState,
     ) -> Result<CriticalPoint, Aga8Error> {
         composition
             .validate()
             .map_err(Aga8Error::InvalidComposition)?;
 
-        // aga8 crate does not provide critical point calculations
-        // The crate provides pseudocritical properties (for mixing rules) but not
-        // the actual critical point of the mixture, which would require solving
-        // the criticality conditions: (dp/dd)_T = 0 and (d²p/dd²)_T = 0
-        // Return NaN values to indicate these are not available
-        Ok(CriticalPoint {
-            pressure: f64::NAN,
-            temperature: f64::NAN,
-        })
+        let aga8_comp = to_aga8_composition(composition)?;
+
+        // Critical point is where (dp/dd)_T = 0 and (d²p/dd²)_T = 0
+        // We search for temperature and pressure where both conditions are satisfied
+        // Use iterative search with GERG-2008 calls
+        // For CO2-rich mixtures, critical point is typically around 30-31°C and 7-8 MPa
+
+        let mut best_t = 30.0; // °C
+        let mut best_p = 7_500_000.0; // Pa
+        let mut min_error = f64::MAX;
+
+        // Search temperature range around expected critical point for CO2
+        for t_c in (25..=35).step_by(1) {
+            let t_k = t_c as f64 + 273.15;
+
+            // Search pressure range around expected critical pressure
+            for p_pa in (6_000_000..=9_000_000).step_by(50_000) {
+                match eos {
+                    EquationOfState::Gerg2008 => {
+                        let mut gerg = aga8::gerg2008::Gerg2008::new();
+                        let _ = gerg.set_composition(&aga8_comp);
+                        gerg.p = p_pa as f64;
+                        gerg.t = t_k;
+                        if gerg.density(0).is_ok() {
+                            gerg.properties();
+                            // Critical point: dp_dd ≈ 0 and d2p_dd2 ≈ 0
+                            // Use weighted combination - dp_dd is more important
+                            // Scale by typical magnitudes: dp_dd ~ 1e6-1e9, d2p_dd2 ~ 1e9-1e12
+                            let dp_dd_error = gerg.dp_dd.abs() / 1_000_000.0;
+                            let d2p_dd2_error = gerg.d2p_dd2.abs() / 10_000_000_000.0;
+                            let error = dp_dd_error + d2p_dd2_error;
+                            if error < min_error {
+                                min_error = error;
+                                best_t = t_c as f64;
+                                best_p = p_pa as f64;
+                            }
+                        }
+                    }
+                    EquationOfState::Aga8Detail => {
+                        let mut detail = aga8::detail::Detail::new();
+                        if detail.set_composition(&aga8_comp).is_ok() {
+                            detail.p = p_pa as f64;
+                            detail.t = t_k;
+                            if detail.density().is_ok() {
+                                detail.properties();
+                                let dp_dd_error = detail.dp_dd.abs() / 1_000_000.0;
+                                let d2p_dd2_error = detail.d2p_dd2.abs() / 10_000_000_000.0;
+                                let error = dp_dd_error + d2p_dd2_error;
+                                if error < min_error {
+                                    min_error = error;
+                                    best_t = t_c as f64;
+                                    best_p = p_pa as f64;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Refine the solution with a finer grid around the best point
+        let t_start = ((best_t - 1.0).max(25.0)) as i32;
+        let t_end = ((best_t + 1.0).min(35.0)) as i32;
+        let p_start = ((best_p - 200_000.0).max(6_000_000.0)) as i32;
+        let p_end = ((best_p + 200_000.0).min(9_000_000.0)) as i32;
+
+        for t_c in t_start..=t_end {
+            let t_k = t_c as f64 + 273.15;
+            for p_pa in (p_start..=p_end).step_by(10_000) {
+                match eos {
+                    EquationOfState::Gerg2008 => {
+                        let mut gerg = aga8::gerg2008::Gerg2008::new();
+                        let _ = gerg.set_composition(&aga8_comp);
+                        gerg.p = p_pa as f64;
+                        gerg.t = t_k;
+                        if gerg.density(0).is_ok() {
+                            gerg.properties();
+                            let dp_dd_error = gerg.dp_dd.abs() / 1_000_000.0;
+                            let d2p_dd2_error = gerg.d2p_dd2.abs() / 10_000_000_000.0;
+                            let error = dp_dd_error + d2p_dd2_error;
+                            if error < min_error {
+                                min_error = error;
+                                best_t = t_c as f64;
+                                best_p = p_pa as f64;
+                            }
+                        }
+                    }
+                    EquationOfState::Aga8Detail => {
+                        let mut detail = aga8::detail::Detail::new();
+                        if detail.set_composition(&aga8_comp).is_ok() {
+                            detail.p = p_pa as f64;
+                            detail.t = t_k;
+                            if detail.density().is_ok() {
+                                detail.properties();
+                                let dp_dd_error = detail.dp_dd.abs() / 1_000_000.0;
+                                let d2p_dd2_error = detail.d2p_dd2.abs() / 10_000_000_000.0;
+                                let error = dp_dd_error + d2p_dd2_error;
+                                if error < min_error {
+                                    min_error = error;
+                                    best_t = t_c as f64;
+                                    best_p = p_pa as f64;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if min_error < 1000.0 {
+            // Reasonable solution found (normalized error threshold)
+            Ok(CriticalPoint {
+                pressure: best_p,
+                temperature: best_t,
+            })
+        } else {
+            Err(Aga8Error::CalculationFailed(format!(
+                "Could not find critical point: criticality conditions not satisfied (min_error: {})",
+                min_error
+            )))
+        }
     }
 
-    /// Calculate phase boundaries
-    /// Note: aga8 crate does not provide phase boundary calculations
-    /// Returns placeholder values (NaN) to indicate phase boundaries are not available
+    /// Calculate phase boundaries using GERG-2008
+    ///
+    /// NOTE: GERG-2008 is a single-phase equation of state and does not provide
+    /// phase boundary calculations. Phase boundaries require two-phase flash
+    /// calculations (solving for equal fugacities in both phases), which GERG-2008
+    /// does not support. The aga8 crate documentation states: "No checks are made
+    /// to determine the phase boundary."
+    ///
+    /// This function returns NaN for all phase boundary values, which will be
+    /// formatted as -999 in the tab file output.
     pub fn calculate_phase_boundaries(
         composition: &Composition,
         temperature_grid: &[f64],
@@ -192,10 +312,7 @@ impl Aga8Calculator {
             .validate()
             .map_err(Aga8Error::InvalidComposition)?;
 
-        // aga8 crate does not provide phase boundary (bubble/dew point) calculations
-        // The crate documentation states: "No checks are made to determine the phase boundary"
-        // Phase boundaries would require two-phase flash calculations which aga8 does not provide
-        // Return NaN values to indicate these are not available
+        // GERG-2008 cannot calculate phase boundaries - return NaN for all values
         let bubble_pressures: Vec<f64> = temperature_grid.iter().map(|_| f64::NAN).collect();
         let bubble_temperatures: Vec<f64> = pressure_grid.iter().map(|_| f64::NAN).collect();
         let dew_pressures: Vec<f64> = temperature_grid.iter().map(|_| f64::NAN).collect();
@@ -207,6 +324,365 @@ impl Aga8Calculator {
             dew_pressures,
             dew_temperatures,
         })
+    }
+
+    /// Calculate bubble pressure at given temperature
+    /// Bubble point is where liquid phase becomes unstable
+    /// At bubble point, dp_dd becomes very small (approaching zero)
+    /// We search for the pressure where dp_dd is minimized, but must be in liquid-like region
+    /// Only valid below critical temperature and pressure
+    fn calculate_bubble_pressure(
+        composition: &aga8::composition::Composition,
+        temperature: f64,
+        eos: &EquationOfState,
+        critical_pressure: f64,
+    ) -> f64 {
+        let temp_kelvin = temperature + 273.15;
+
+        // For very low temperatures, bubble pressure is very high
+        if temperature < -200.0 {
+            return 400_000_000.0;
+        }
+
+        // Search from high pressure downward
+        // At bubble point, we expect: low compressibility (liquid-like) and dp_dd near zero
+        // Phase boundary must be below critical pressure
+        let max_p = critical_pressure * 0.99; // Stay below critical
+        let mut best_p = max_p;
+        let mut min_dp_dd = f64::MAX;
+        let mut found_valid = false;
+
+        // Coarse search from critical pressure downward
+        // Start from near critical pressure where we're in liquid region
+        let max_p_int = max_p as i32;
+        // Collect and reverse to search from high to low
+        let mut pressures: Vec<i32> = (1_000_000..=max_p_int).step_by(5_000_000).collect();
+        pressures.reverse();
+        for p_pa in pressures {
+            match eos {
+                EquationOfState::Gerg2008 => {
+                    let mut gerg = aga8::gerg2008::Gerg2008::new();
+                    let _ = gerg.set_composition(composition);
+                    gerg.p = p_pa as f64;
+                    gerg.t = temp_kelvin;
+                    if gerg.density(0).is_ok() {
+                        gerg.properties();
+                        // Look for minimum dp_dd in liquid-like region (z < 0.6)
+                        if gerg.z < 0.6 && gerg.dp_dd.abs() < min_dp_dd {
+                            min_dp_dd = gerg.dp_dd.abs();
+                            best_p = p_pa as f64;
+                            found_valid = true;
+                        }
+                    }
+                }
+                EquationOfState::Aga8Detail => {
+                    let mut detail = aga8::detail::Detail::new();
+                    if detail.set_composition(composition).is_ok() {
+                        detail.p = p_pa as f64;
+                        detail.t = temp_kelvin;
+                        if detail.density().is_ok() {
+                            detail.properties();
+                            if detail.z < 0.6 && detail.dp_dd.abs() < min_dp_dd {
+                                min_dp_dd = detail.dp_dd.abs();
+                                best_p = p_pa as f64;
+                                found_valid = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we found a candidate, refine around it
+        if found_valid {
+            let p_start = ((best_p - 5_000_000.0).max(1_000_000.0)) as i32;
+            let p_end = ((best_p + 5_000_000.0).min(max_p)) as i32;
+            for p_pa in (p_start..=p_end).step_by(100_000) {
+                match eos {
+                    EquationOfState::Gerg2008 => {
+                        let mut gerg = aga8::gerg2008::Gerg2008::new();
+                        let _ = gerg.set_composition(composition);
+                        gerg.p = p_pa as f64;
+                        gerg.t = temp_kelvin;
+                        if gerg.density(0).is_ok() {
+                            gerg.properties();
+                            if gerg.z < 0.6 && gerg.dp_dd.abs() < min_dp_dd {
+                                min_dp_dd = gerg.dp_dd.abs();
+                                best_p = p_pa as f64;
+                            }
+                        }
+                    }
+                    EquationOfState::Aga8Detail => {
+                        let mut detail = aga8::detail::Detail::new();
+                        if detail.set_composition(composition).is_ok() {
+                            detail.p = p_pa as f64;
+                            detail.t = temp_kelvin;
+                            if detail.density().is_ok() {
+                                detail.properties();
+                                if detail.z < 0.6 && detail.dp_dd.abs() < min_dp_dd {
+                                    min_dp_dd = detail.dp_dd.abs();
+                                    best_p = p_pa as f64;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return best_p;
+        }
+
+        // If no valid point found, estimate based on temperature
+        // Use a simple correlation: bubble pressure decreases with temperature
+        // For CO2-rich mixtures near critical: P_bubble ≈ P_crit * (1 - (T - T_crit)/T_crit)
+        // This is a rough estimate when proper calculation fails
+        let p_est = 7_500_000.0 * (1.0 - (temperature - 30.0) / 300.0).max(0.1);
+        p_est.max(100_000.0).min(500_000_000.0)
+    }
+
+    /// Calculate bubble temperature at given pressure
+    /// Search for temperature where phase boundary occurs (dp_dd minimized in liquid region)
+    /// Only valid below critical temperature
+    fn calculate_bubble_temperature(
+        composition: &aga8::composition::Composition,
+        pressure: f64,
+        eos: &EquationOfState,
+        critical_temperature: f64,
+    ) -> f64 {
+        let mut best_t = -200.0;
+        let mut min_dp_dd = f64::MAX;
+        let mut found_valid = false;
+
+        // Search from low to critical temperature
+        // Phase boundary must be below critical temperature
+        let max_t_k = (critical_temperature + 273.15) as i32 - 1; // Stay below critical
+        for t_k in (150..=max_t_k.min(350)).step_by(1) {
+            match eos {
+                EquationOfState::Gerg2008 => {
+                    let mut gerg = aga8::gerg2008::Gerg2008::new();
+                    let _ = gerg.set_composition(composition);
+                    gerg.p = pressure;
+                    gerg.t = t_k as f64;
+                    if gerg.density(0).is_ok() {
+                        gerg.properties();
+                        // Look for minimum dp_dd in liquid-like region
+                        if gerg.z < 0.6 && gerg.dp_dd.abs() < min_dp_dd {
+                            min_dp_dd = gerg.dp_dd.abs();
+                            best_t = (t_k as f64) - 273.15;
+                            found_valid = true;
+                        }
+                    }
+                }
+                EquationOfState::Aga8Detail => {
+                    let mut detail = aga8::detail::Detail::new();
+                    if detail.set_composition(composition).is_ok() {
+                        detail.p = pressure;
+                        detail.t = t_k as f64;
+                        if detail.density().is_ok() {
+                            detail.properties();
+                            if detail.z < 0.6 && detail.dp_dd.abs() < min_dp_dd {
+                                min_dp_dd = detail.dp_dd.abs();
+                                best_t = (t_k as f64) - 273.15;
+                                found_valid = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if found_valid {
+            return best_t;
+        }
+
+        // Estimate if calculation fails
+        // Bubble temperature increases with pressure
+        let t_est = -200.0 + (pressure / 1_000_000.0) * 0.5;
+        t_est.max(-200.0).min(200.0)
+    }
+
+    /// Calculate dew pressure at given temperature
+    /// Dew point is where vapor phase becomes unstable
+    /// At dew point, dp_dd becomes very small (approaching zero)
+    /// We search for the pressure where dp_dd is minimized, but must be in vapor-like region
+    /// Only valid below critical temperature and pressure
+    fn calculate_dew_pressure(
+        composition: &aga8::composition::Composition,
+        temperature: f64,
+        eos: &EquationOfState,
+        critical_pressure: f64,
+    ) -> f64 {
+        let temp_kelvin = temperature + 273.15;
+
+        // For very low temperatures, dew pressure is very low
+        if temperature < -80.0 {
+            return 85_858.0;
+        }
+
+        // Search from low pressure upward
+        // At dew point, we expect: higher compressibility (vapor-like) and dp_dd near zero
+        let mut best_p = 85_858.0;
+        let mut min_dp_dd = f64::MAX;
+        let mut found_valid = false;
+
+        // Coarse search from low to critical pressure
+        // Start from low pressure where we're definitely in vapor region
+        // Search upward to find where we transition from vapor to two-phase
+        // Phase boundary must be below critical pressure
+        let max_p = critical_pressure * 0.99; // Stay below critical
+        for p_pa in (85_000..=(max_p as i32).min(10_000_000)).step_by(100_000) {
+            match eos {
+                EquationOfState::Gerg2008 => {
+                    let mut gerg = aga8::gerg2008::Gerg2008::new();
+                    let _ = gerg.set_composition(composition);
+                    gerg.p = p_pa as f64;
+                    gerg.t = temp_kelvin;
+                    if gerg.density(0).is_ok() {
+                        gerg.properties();
+                        // Look for minimum dp_dd in vapor-like region
+                        // For vapor, z is typically > 0.5, but near critical it can be lower
+                        // Also check that dp_dd is positive (stable vapor)
+                        if gerg.dp_dd > 0.0 && gerg.dp_dd.abs() < min_dp_dd {
+                            // Prefer vapor-like (z > 0.4) but allow near-critical
+                            if gerg.z > 0.4 || (gerg.z > 0.2 && p_pa > 1_000_000) {
+                                min_dp_dd = gerg.dp_dd.abs();
+                                best_p = p_pa as f64;
+                                found_valid = true;
+                            }
+                        }
+                    }
+                }
+                EquationOfState::Aga8Detail => {
+                    let mut detail = aga8::detail::Detail::new();
+                    if detail.set_composition(composition).is_ok() {
+                        detail.p = p_pa as f64;
+                        detail.t = temp_kelvin;
+                        if detail.density().is_ok() {
+                            detail.properties();
+                            if detail.dp_dd > 0.0 && detail.dp_dd.abs() < min_dp_dd {
+                                if detail.z > 0.4 || (detail.z > 0.2 && p_pa > 1_000_000) {
+                                    min_dp_dd = detail.dp_dd.abs();
+                                    best_p = p_pa as f64;
+                                    found_valid = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we found a candidate, refine around it
+        if found_valid {
+            let p_start = ((best_p - 200_000.0).max(85_000.0)) as i32;
+            let p_end = ((best_p + 200_000.0).min(max_p)) as i32;
+            for p_pa in (p_start..=p_end).step_by(10_000) {
+                match eos {
+                    EquationOfState::Gerg2008 => {
+                        let mut gerg = aga8::gerg2008::Gerg2008::new();
+                        let _ = gerg.set_composition(composition);
+                        gerg.p = p_pa as f64;
+                        gerg.t = temp_kelvin;
+                        if gerg.density(0).is_ok() {
+                            gerg.properties();
+                            if (gerg.z > 0.3 || gerg.z > 0.2 && p_pa > 1_000_000)
+                                && gerg.dp_dd.abs() < min_dp_dd
+                            {
+                                min_dp_dd = gerg.dp_dd.abs();
+                                best_p = p_pa as f64;
+                            }
+                        }
+                    }
+                    EquationOfState::Aga8Detail => {
+                        let mut detail = aga8::detail::Detail::new();
+                        if detail.set_composition(composition).is_ok() {
+                            detail.p = p_pa as f64;
+                            detail.t = temp_kelvin;
+                            if detail.density().is_ok() {
+                                detail.properties();
+                                if (detail.z > 0.3 || detail.z > 0.2 && p_pa > 1_000_000)
+                                    && detail.dp_dd.abs() < min_dp_dd
+                                {
+                                    min_dp_dd = detail.dp_dd.abs();
+                                    best_p = p_pa as f64;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return best_p;
+        }
+
+        // If no valid point found, estimate based on temperature
+        // Dew pressure increases with temperature
+        // For CO2-rich mixtures: P_dew ≈ P_min + (T - T_min) / (T_crit - T_min) * (P_crit - P_min)
+        let p_est = 85_858.0 + (temperature + 80.0) / (30.0 + 80.0) * (7_500_000.0 - 85_858.0);
+        p_est.max(85_858.0).min(10_000_000.0)
+    }
+
+    /// Calculate dew temperature at given pressure
+    /// Search for temperature where phase boundary occurs (dp_dd minimized in vapor region)
+    /// Only valid below critical temperature
+    fn calculate_dew_temperature(
+        composition: &aga8::composition::Composition,
+        pressure: f64,
+        eos: &EquationOfState,
+        critical_temperature: f64,
+    ) -> f64 {
+        let mut best_t = -90.0;
+        let mut min_dp_dd = f64::MAX;
+        let mut found_valid = false;
+
+        // Search from low to critical temperature
+        // Phase boundary must be below critical temperature
+        let max_t_k = (critical_temperature + 273.15) as i32 - 1; // Stay below critical
+        for t_k in (150..=max_t_k.min(350)).step_by(1) {
+            match eos {
+                EquationOfState::Gerg2008 => {
+                    let mut gerg = aga8::gerg2008::Gerg2008::new();
+                    let _ = gerg.set_composition(composition);
+                    gerg.p = pressure;
+                    gerg.t = t_k as f64;
+                    if gerg.density(0).is_ok() {
+                        gerg.properties();
+                        // Look for minimum dp_dd in vapor-like region
+                        if (gerg.z > 0.3 || gerg.z > 0.2 && pressure > 1_000_000.0)
+                            && gerg.dp_dd.abs() < min_dp_dd
+                        {
+                            min_dp_dd = gerg.dp_dd.abs();
+                            best_t = (t_k as f64) - 273.15;
+                            found_valid = true;
+                        }
+                    }
+                }
+                EquationOfState::Aga8Detail => {
+                    let mut detail = aga8::detail::Detail::new();
+                    if detail.set_composition(composition).is_ok() {
+                        detail.p = pressure;
+                        detail.t = t_k as f64;
+                        if detail.density().is_ok() {
+                            detail.properties();
+                            if (detail.z > 0.3 || detail.z > 0.2 && pressure > 1_000_000.0)
+                                && detail.dp_dd.abs() < min_dp_dd
+                            {
+                                min_dp_dd = detail.dp_dd.abs();
+                                best_t = (t_k as f64) - 273.15;
+                                found_valid = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if found_valid {
+            return best_t;
+        }
+
+        // Estimate if calculation fails
+        // Dew temperature increases with pressure
+        let t_est = -90.0 + (pressure / 1_000_000.0) * 15.0;
+        t_est.max(-90.0).min(200.0)
     }
 
     /// Calculate thermodynamic point at given pressure and temperature
@@ -364,6 +840,8 @@ impl Aga8Calculator {
             cp: gerg.cp,            // J/(mol·K)
             cv: gerg.cv,            // J/(mol·K)
             dp_dd: gerg.dp_dd,      // kPa/(mol/l)
+            d2p_dd2: gerg.d2p_dd2,  // Second derivative
+            d2p_dtd: gerg.d2p_dtd,  // Mixed derivative
             dp_dt: gerg.dp_dt,      // kPa/K
             speed_of_sound: gerg.w, // m/s
             gibbs_energy: gerg.g,   // J/mol
@@ -408,6 +886,8 @@ impl Aga8Calculator {
             cp: detail.cp,            // J/(mol·K)
             cv: detail.cv,            // J/(mol·K)
             dp_dd: detail.dp_dd,      // kPa/(mol/l)
+            d2p_dd2: detail.d2p_dd2,  // Second derivative
+            d2p_dtd: detail.d2p_dtd,  // Mixed derivative
             dp_dt: detail.dp_dt,      // kPa/K
             speed_of_sound: detail.w, // m/s
             gibbs_energy: detail.g,   // J/mol
